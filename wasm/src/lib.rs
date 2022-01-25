@@ -152,7 +152,10 @@ impl<'a, 's> Serialize for NamedRow<'a> {
                 ValueRef::Null => map.serialize_entry(&self.names[i], &JsonValue::Null)?,
                 ValueRef::Integer(v) => map.serialize_entry(&self.names[i], &v)?,
                 ValueRef::Real(v) => map.serialize_entry(&self.names[i], &v)?,
-                ValueRef::Text(v) => map.serialize_entry(&self.names[i], &v)?,
+                ValueRef::Text(v) => {
+                    let s = String::from_utf8_lossy(v);
+                    map.serialize_entry(&self.names[i], &s)?
+                }
                 ValueRef::Blob(v) => map.serialize_entry(&self.names[i], &v)?,
             }
         }

@@ -1,6 +1,6 @@
 {
   "name": "@rkusa/wasm-sqlite",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rkusa/wasm-sqlite.git"
