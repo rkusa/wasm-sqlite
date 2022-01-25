@@ -5,7 +5,7 @@ SQLite compiled to WASM with a pluggable data storage. Useful to save SQLite in 
 **Status:** This is very experimental. Don't use it for real applications yet! See the [conclusion of my blog post](https://ma.rkusa.st/store-sqlite-in-cloudflare-durable-objects#conclusion) for reasons for why not to use it.
 
 ```bash
-npm install -S wasm-sqlite
+npm install -S @rkusa/wasm-sqlite
 ```
 
 ## Example
