@@ -1,0 +1,33 @@
+{
+  "name": "wasm-sqlite",
+  "version": "0.1.0-alpha.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rkusa/wasm-sqlite.git"
+  },
+  "license": "MIT OR Apache-2.0",
+  "description": "SQLite compiled to WASM with a pluggable data storage",
+  "keywords": [
+    "sqlite",
+    "vfs",
+    "wasm"
+  ],
+  "typings": "dist/lib.d.ts",
+  "module": "dist/wasm-sqlite.js",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "./build.sh",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@tsconfig/recommended": "^1.0.1",
+    "esbuild": "^0.14.11",
+    "typescript": "^4.3.2"
+  },
+  "dependencies": {
+    "asyncify-wasm": "^1.2.1"
+  }
+}
