@@ -194,9 +194,9 @@ const ERRNO_BADF = 8;
 
 interface Exports {
   readonly memory: WebAssembly.Memory;
-  alloc(size: number): number;
-  dealloc(size: number, len: number): void;
-  query_result_destroy(ptr: number): void;
-  execute(ptr: number, len: number): void;
-  query(ptr: number, len: number): number;
+  alloc(size: number): Promise<number>;
+  dealloc(size: number, len: number): Promise<void>;
+  query_result_destroy(ptr: number): Promise<void>;
+  execute(ptr: number, len: number): Promise<void>;
+  query(ptr: number, len: number): Promise<number>;
 }
