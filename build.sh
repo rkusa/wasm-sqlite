@@ -14,6 +14,6 @@ cd ..
 
 ./node_modules/.bin/tsc --emitDeclarationOnly
 
-wasm-opt -O --asyncify --pass-arg asyncify-imports@env.put_page,env.get_page \
+wasm-opt -Os --asyncify --pass-arg asyncify-imports@env.put_page,env.get_page \
   wasm/target/wasm32-wasi/release/wasm_sqlite.wasm \
   -o dist/wasm_sqlite.wasm
