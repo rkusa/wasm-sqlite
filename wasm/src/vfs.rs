@@ -16,7 +16,7 @@ struct Page<const PAGE_SIZE: usize> {
 pub struct Pages<const PAGE_SIZE: usize> {
     count: usize,
     offset: usize,
-    blocks: HashMap<u32, Page<PAGE_SIZE>>,
+    pages: HashMap<u32, Page<PAGE_SIZE>>,
 }
 
 impl<const PAGE_SIZE: usize> Vfs for PagesVfs<PAGE_SIZE> {
@@ -29,18 +29,18 @@ impl<const PAGE_SIZE: usize> Vfs for PagesVfs<PAGE_SIZE> {
     ) -> Result<Self::File, std::io::Error> {
         // TODO: open file based on path
 
-        let mut blocks = Pages {
+        let mut pages = Pages {
             count: 0,
             offset: 0,
-            blocks: Default::default(),
+            pages: Default::default(),
         };
 
         if let Some(page) = Self::File::get_page(0) {
             // TODO: unwrap?
-            blocks.count = u32::from_be_bytes(page[28..32].try_into().unwrap()) as usize;
+            pages.count = u32::from_be_bytes(page[28..32].try_into().unwrap()) as usize;
         }
 
-        Ok(blocks)
+        Ok(pages)
     }
 
     fn delete(&self, _path: &std::path::Path) -> Result<(), std::io::Error> {
@@ -83,8 +83,8 @@ impl<const PAGE_SIZE: usize> Seek for Pages<PAGE_SIZE> {
 impl<const PAGE_SIZE: usize> Read for Pages<PAGE_SIZE> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let offset = self.offset % PAGE_SIZE;
-        let block = self.current()?;
-        let n = (&block.data[offset..]).read(buf)?;
+        let page = self.current()?;
+        let n = (&page.data[offset..]).read(buf)?;
         self.offset += n;
         Ok(n)
     }
@@ -93,9 +93,9 @@ impl<const PAGE_SIZE: usize> Read for Pages<PAGE_SIZE> {
 impl<const PAGE_SIZE: usize> Write for Pages<PAGE_SIZE> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let offset = self.offset % PAGE_SIZE;
-        let block = self.current()?;
-        let n = (&mut block.data[offset..]).write(buf)?;
-        block.dirty = true;
+        let page = self.current()?;
+        let n = (&mut page.data[offset..]).write(buf)?;
+        page.dirty = true;
         self.offset += n;
 
         let count = (self.offset / PAGE_SIZE) + 1;
@@ -107,10 +107,10 @@ impl<const PAGE_SIZE: usize> Write for Pages<PAGE_SIZE> {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        for (index, block) in &mut self.blocks {
-            if block.dirty {
-                Self::put_page(*index, &block.data);
-                block.dirty = false;
+        for (index, page) in &mut self.pages {
+            if page.dirty {
+                Self::put_page(*index, &page.data);
+                page.dirty = false;
             }
         }
         Ok(())
@@ -121,7 +121,7 @@ impl<const PAGE_SIZE: usize> Pages<PAGE_SIZE> {
     fn current(&mut self) -> Result<&mut Page<PAGE_SIZE>, std::io::Error> {
         let index = self.offset / PAGE_SIZE;
 
-        if let Entry::Vacant(entry) = self.blocks.entry(index as u32) {
+        if let Entry::Vacant(entry) = self.pages.entry(index as u32) {
             let data = Self::get_page(index as u32);
             entry.insert(Page {
                 data: data.unwrap_or_else(|| [0; PAGE_SIZE]),
@@ -129,7 +129,7 @@ impl<const PAGE_SIZE: usize> Pages<PAGE_SIZE> {
             });
         }
 
-        Ok(self.blocks.get_mut(&(index as u32)).unwrap())
+        Ok(self.pages.get_mut(&(index as u32)).unwrap())
     }
 
     pub fn get_page(ix: u32) -> Option<[u8; PAGE_SIZE]> {

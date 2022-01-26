@@ -1,6 +1,6 @@
 # `wasm-sqlite`
 
-SQLite compiled to WASM with a pluggable data storage. Useful to save SQLite in e.g. Cloudflare Durable Objects (example: https://github.com/rkusa/do-sqlite).
+SQLite compiled to WASM with pluggable data storage. Useful to save SQLite in e.g. Cloudflare Durable Objects (example: https://github.com/rkusa/do-sqlite).
 
 **Status:** This is very experimental. Don't use it for real applications yet! See the [conclusion of my blog post](https://ma.rkusa.st/store-sqlite-in-cloudflare-durable-objects#conclusion) for reasons for why not to use it.
 
