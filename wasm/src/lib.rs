@@ -1,35 +1,56 @@
 use std::cell::RefCell;
+use std::ffi::CString;
+use std::os::raw::c_char;
 use std::ptr::NonNull;
 
-use rusqlite::{params_from_iter, Connection, OpenFlags, Row, Rows};
+use rusqlite::{params_from_iter, OpenFlags, Row, Rows};
 use serde::ser::Serializer;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use sqlite_vfs::register;
+use sqlite_vfs::{register, RegisterError};
 
 pub use crate::vfs::PagesVfs;
 
 mod vfs;
 
 extern "C" {
-    pub fn get_page(ix: u32) -> *mut u8;
+    pub fn page_count() -> u32;
+    pub fn get_page(ix: u32, ptr: *mut u8);
     pub fn put_page(ix: u32, ptr: *const u8);
+    pub fn del_page(ix: u32);
+    pub fn conn_sleep(ms: u32);
 }
 
 // TODO: is there any way to provide this method for SQLite, but not export it as part of the WASM
 // module?
 #[no_mangle]
 extern "C" fn sqlite3_os_init() -> i32 {
-    if register("cfdo", PagesVfs::<4096>).is_ok() {
-        0
-    } else {
-        1
+    const SQLITE_OK: i32 = 0;
+    const SQLITE_ERROR: i32 = 1;
+
+    pretty_env_logger::formatted_builder()
+        .filter(Some("sqlite_vfs"), log::LevelFilter::Trace)
+        .try_init()
+        .ok();
+
+    match register("cfdo", PagesVfs::<4096>::default(), true) {
+        Ok(_) => SQLITE_OK,
+        Err(RegisterError::Nul(_)) => SQLITE_ERROR,
+        Err(RegisterError::Register(code)) => code,
     }
 }
 
-fn connect() -> Connection {
-    let conn = Connection::open_with_flags_and_vfs(
-        "main.db3",
+pub struct Connection {
+    conn: rusqlite::Connection,
+    last_error: Option<Box<dyn std::error::Error>>,
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn conn_new() -> *mut Connection {
+    let is_new = page_count() == 0;
+
+    let conn = rusqlite::Connection::open_with_flags_and_vfs(
+        "main.db",
         OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -37,15 +58,63 @@ fn connect() -> Connection {
     )
     .expect("open connection");
 
-    // TODO: detect new DB and only execute once after being created
-    conn.execute("PRAGMA page_size = 4096;", [])
-        .expect("set page_size = 4096");
-    let journal_mode: String = conn
-        .query_row("PRAGMA journal_mode = MEMORY", [], |row| row.get(0))
-        .expect("set journal_mode = MEMORY");
-    assert_eq!(journal_mode, "memory");
+    if is_new {
+        conn.execute("PRAGMA page_size = 4096;", [])
+            .expect("set page_size = 4096");
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode = MEMORY", [], |row| row.get(0))
+            .expect("set journal_mode = MEMORY");
+        assert_eq!(journal_mode, "memory");
+    }
 
-    conn
+    Box::into_raw(Box::new(Connection {
+        conn,
+        last_error: None,
+    }))
+}
+
+#[no_mangle]
+pub extern "C" fn conn_last_error(conn: *mut Connection) -> *mut c_char {
+    use std::fmt::Write;
+
+    let conn: &mut Connection = unsafe { conn.as_mut().unwrap() };
+
+    if let Some(err) = conn.last_error.take() {
+        let mut message = err.to_string();
+
+        let mut source = std::error::Error::source(err.as_ref());
+        let mut i = 0;
+
+        if source.is_some() {
+            message += "\n\nCaused by:\n";
+        }
+
+        while let Some(err) = source {
+            if i > 0 {
+                writeln!(&mut message).ok();
+            }
+            write!(&mut message, "{:>4}: {}", i, err).ok();
+            source = std::error::Error::source(err);
+            i += 1;
+        }
+
+        CString::new(message).unwrap().into_raw()
+    } else {
+        std::ptr::null_mut()
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn conn_last_error_drop(s: *mut c_char) {
+    if s.is_null() {
+        return;
+    }
+    let _ = CString::from_raw(s);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn conn_drop(conn: *mut Connection) {
+    Box::from_raw(conn);
 }
 
 #[derive(serde::Deserialize)]
@@ -55,13 +124,27 @@ struct Query {
 }
 
 #[no_mangle]
-extern "C" fn execute(ptr: *const u8, len: usize) {
-    let query = unsafe { std::slice::from_raw_parts::<'_, u8>(ptr, len) };
-    let query: Query = serde_json::from_slice(query).expect("deserialize query");
-    let conn = connect();
+extern "C" fn conn_execute(conn: *mut Connection, ptr: *const u8, len: usize) -> i32 {
+    let conn: &mut Connection = unsafe { conn.as_mut().unwrap() };
 
-    conn.execute(&query.sql, params_from_iter(&query.params))
-        .expect("execute query");
+    let query = unsafe { std::slice::from_raw_parts::<'_, u8>(ptr, len) };
+    let query: Query = match serde_json::from_slice(query) {
+        Ok(query) => query,
+        Err(err) => {
+            conn.last_error = Some(Box::new(err));
+            return 0;
+        }
+    };
+
+    if let Err(err) = conn
+        .conn
+        .execute(&query.sql, params_from_iter(&query.params))
+    {
+        conn.last_error = Some(Box::new(err));
+        0
+    } else {
+        1
+    }
 }
 
 pub struct JsonString {
@@ -86,24 +169,49 @@ impl JsonString {
 }
 
 #[no_mangle]
-extern "C" fn query(ptr: *const u8, len: usize) -> *const JsonString {
-    let query = unsafe { std::slice::from_raw_parts::<'_, u8>(ptr, len) };
-    let query: Query = serde_json::from_slice(query).expect("deserialize query");
-    let conn = connect();
+extern "C" fn conn_query(conn: *mut Connection, ptr: *const u8, len: usize) -> *const JsonString {
+    let conn: &mut Connection = unsafe { conn.as_mut().unwrap() };
 
-    let mut stmt = conn.prepare(&query.sql).expect("prepare query");
+    let query = unsafe { std::slice::from_raw_parts::<'_, u8>(ptr, len) };
+    let query: Query = match serde_json::from_slice(query) {
+        Ok(query) => query,
+        Err(err) => {
+            conn.last_error = Some(Box::new(err));
+            return std::ptr::null();
+        }
+    };
+
+    let mut stmt = match conn.conn.prepare(&query.sql) {
+        Ok(stmt) => stmt,
+        Err(err) => {
+            conn.last_error = Some(Box::new(err));
+            return std::ptr::null();
+        }
+    };
     let names = stmt
         .column_names()
         .into_iter()
         .map(String::from)
         .collect::<Vec<_>>();
-    let rows = stmt.query(params_from_iter(&query.params)).expect("query");
+    let rows = match stmt.query(params_from_iter(&query.params)) {
+        Ok(rows) => rows,
+        Err(err) => {
+            conn.last_error = Some(Box::new(err));
+            return std::ptr::null();
+        }
+    };
     let rows = NamedRows {
         names,
         rows: RefCell::new(rows),
     };
 
-    let result = serde_json::to_string(&rows).expect("serialize query result");
+    let result = match serde_json::to_string(&rows) {
+        Ok(result) => result,
+        Err(err) => {
+            conn.last_error = Some(Box::new(err));
+            return std::ptr::null();
+        }
+    };
     JsonString::new(result).into_raw()
 }
 
@@ -121,7 +229,10 @@ impl<'a, 's> Serialize for NamedRows<'a> {
 
         let mut rows = self.rows.borrow_mut();
         let mut seq = serializer.serialize_seq(None)?;
-        while let Some(row) = rows.next().expect("next row") {
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| serde::ser::Error::custom(format!("failed to get next row: {}", err)))?
+        {
             let row = NamedRow {
                 names: &self.names,
                 row,
@@ -181,7 +292,7 @@ unsafe fn dealloc(ptr: *mut u8, size: usize) {
 }
 
 #[no_mangle]
-unsafe extern "C" fn query_result_destroy(json: *mut JsonString) {
+unsafe extern "C" fn query_result_drop(json: *mut JsonString) {
     Box::from_raw(json);
 }
 

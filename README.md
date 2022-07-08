@@ -11,20 +11,30 @@ npm install -S @rkusa/wasm-sqlite
 ## Example
 
 ```ts
-const sqlite = await Sqlite.instantiate(
-  // get page
-  async (ix: number) => {
-    return await storage.get(ix) ?? new Uint8Array(4096);
+const sqlite = await Sqlite.instantiate({
+  pageCount(): number {
+    return self.pageCount;
   },
 
-  // put page
-  async (ix: number, page: Uint8Array) => {
-    await storage.put(ix, page);
-  }
-);
+  async getPage(ix: number): Promise<Uint8Array> {
+    return (await storage.get(ix)) ?? new Uint8Array(4096);
+  },
 
-await sqlite.execute("...", []);
-const query: T = await sqlite.query("...", []);
+  async putPage(ix: number, page: Uint8Array): Promise<void> {
+    await storage.put(ix, page);
+  },
+
+  async delPage(ix: number): Promise<void> {
+    await storage.delete(ix);
+    if (ix + 1 >= self.pageCount) {
+      self.pageCount = ix;
+    }
+  },
+});
+
+const conn = await this.sqlite.connect();
+await conn.execute("...", []);
+const query: T = await conn.query("...", []);
 ```
 
 ## Build

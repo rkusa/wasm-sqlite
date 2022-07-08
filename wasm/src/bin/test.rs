@@ -3,7 +3,7 @@ use sqlite_vfs::register;
 use wasm_sqlite::PagesVfs;
 
 fn main() {
-    register("cfdo", PagesVfs::<4096>).unwrap();
+    register("cfdo", PagesVfs::<4096>::default(), true).unwrap();
 
     let conn = Connection::open_with_flags_and_vfs(
         "main.db3",
