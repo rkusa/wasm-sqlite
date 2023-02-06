@@ -29,7 +29,7 @@ extern "C" fn sqlite3_os_init() -> i32 {
     const SQLITE_ERROR: i32 = 1;
 
     pretty_env_logger::formatted_builder()
-        .filter(Some("sqlite_vfs"), log::LevelFilter::Trace)
+        .filter(Some("sqlite_vfs"), log::LevelFilter::Debug)
         .try_init()
         .ok();
 
