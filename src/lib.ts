@@ -138,8 +138,8 @@ export class Sqlite {
 
         async get_page(ix: number, ptr: number) {
           const page = await vfs.getPage(ix);
-          console.log("got page:", ix, page);
-          console.log("write at", ptr, page.length);
+          // console.log("got page:", ix, page);
+          // console.log("write at", ptr, page.length);
           const dst = new Uint8Array(exports.memory.buffer, ptr, 4096);
           dst.set(page);
         },
@@ -154,7 +154,7 @@ export class Sqlite {
         },
 
         async conn_sleep(ms: number) {
-          console.log("sleep", ms);
+          // console.log("sleep", ms);
           await new Promise<void>((resolve) => setTimeout(resolve, ms));
         },
       },
@@ -325,7 +325,10 @@ class Log {
       }
       this.buffer = "";
     } else {
-      this.timeout = setTimeout(() => this.write("\n"), 500);
+      this.timeout = setTimeout(
+        () => this.write("\n"),
+        500
+      ) as unknown as number;
     }
   }
 }
