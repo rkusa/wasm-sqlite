@@ -61,11 +61,12 @@ pub unsafe extern "C" fn conn_new() -> *mut Connection {
     if is_new {
         conn.execute("PRAGMA page_size = 4096;", [])
             .expect("set page_size = 4096");
-        let journal_mode: String = conn
-            .query_row("PRAGMA journal_mode = MEMORY", [], |row| row.get(0))
-            .expect("set journal_mode = MEMORY");
-        assert_eq!(journal_mode, "memory");
     }
+
+    let journal_mode: String = conn
+        .query_row("PRAGMA journal_mode = MEMORY", [], |row| row.get(0))
+        .expect("set journal_mode = MEMORY");
+    assert_eq!(journal_mode, "memory");
 
     Box::into_raw(Box::new(Connection {
         conn,
