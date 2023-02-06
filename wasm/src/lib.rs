@@ -74,7 +74,7 @@ pub unsafe extern "C" fn conn_new() -> *mut Connection {
 }
 
 #[no_mangle]
-pub extern "C" fn conn_last_error(conn: *mut Connection) -> *mut c_char {
+pub unsafe extern "C" fn conn_last_error(conn: *mut Connection) -> *mut c_char {
     use std::fmt::Write;
 
     let conn: &mut Connection = unsafe { conn.as_mut().unwrap() };
@@ -93,7 +93,7 @@ pub extern "C" fn conn_last_error(conn: *mut Connection) -> *mut c_char {
             if i > 0 {
                 writeln!(&mut message).ok();
             }
-            write!(&mut message, "{:>4}: {}", i, err).ok();
+            write!(&mut message, "{i:>4}: {err}").ok();
             source = std::error::Error::source(err);
             i += 1;
         }
@@ -114,7 +114,7 @@ pub unsafe extern "C" fn conn_last_error_drop(s: *mut c_char) {
 
 #[no_mangle]
 pub unsafe extern "C" fn conn_drop(conn: *mut Connection) {
-    Box::from_raw(conn);
+    drop(Box::from_raw(conn));
 }
 
 #[derive(serde::Deserialize)]
@@ -220,7 +220,7 @@ struct NamedRows<'a> {
     rows: RefCell<Rows<'a>>,
 }
 
-impl<'a, 's> Serialize for NamedRows<'a> {
+impl<'a> Serialize for NamedRows<'a> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -231,7 +231,7 @@ impl<'a, 's> Serialize for NamedRows<'a> {
         let mut seq = serializer.serialize_seq(None)?;
         while let Some(row) = rows
             .next()
-            .map_err(|err| serde::ser::Error::custom(format!("failed to get next row: {}", err)))?
+            .map_err(|err| serde::ser::Error::custom(format!("failed to get next row: {err}")))?
         {
             let row = NamedRow {
                 names: &self.names,
@@ -248,7 +248,7 @@ struct NamedRow<'a> {
     row: &'a Row<'a>,
 }
 
-impl<'a, 's> Serialize for NamedRow<'a> {
+impl<'a> Serialize for NamedRow<'a> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -293,13 +293,13 @@ unsafe fn dealloc(ptr: *mut u8, size: usize) {
 
 #[no_mangle]
 unsafe extern "C" fn query_result_drop(json: *mut JsonString) {
-    Box::from_raw(json);
+    drop(Box::from_raw(json));
 }
 
 impl Drop for JsonString {
     fn drop(&mut self) {
         unsafe {
-            String::from_raw_parts(self.ptr.as_ptr(), self.len as usize, self.cap as usize);
+            String::from_raw_parts(self.ptr.as_ptr(), self.len, self.cap);
         }
     }
 }

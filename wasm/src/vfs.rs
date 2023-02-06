@@ -28,7 +28,7 @@ impl<const PAGE_SIZE: usize> Vfs for PagesVfs<PAGE_SIZE> {
         if db != "main.db" {
             return Err(io::Error::new(
                 ErrorKind::NotFound,
-                format!("unexpected database name `{}`; expected `main.db3`", db),
+                format!("unexpected database name `{db}`; expected `main.db3`"),
             ));
         }
 
@@ -76,7 +76,7 @@ impl<const PAGE_SIZE: usize> sqlite_vfs::DatabaseHandle for Connection<PAGE_SIZE
 
     fn size(&self) -> Result<u64, io::Error> {
         let size = Self::page_count() * PAGE_SIZE;
-        eprintln!("size={}", size);
+        eprintln!("size={size}");
         Ok(size as u64)
     }
 
@@ -131,7 +131,7 @@ impl<const PAGE_SIZE: usize> sqlite_vfs::DatabaseHandle for Connection<PAGE_SIZE
     }
 
     fn set_len(&mut self, size: u64) -> Result<(), io::Error> {
-        eprintln!("set_len={}", size);
+        eprintln!("set_len={size}");
 
         let mut page_count = size as usize / PAGE_SIZE;
         if size as usize % PAGE_SIZE > 0 {
@@ -168,13 +168,13 @@ impl<const PAGE_SIZE: usize> sqlite_vfs::DatabaseHandle for Connection<PAGE_SIZE
 
     fn set_chunk_size(&self, chunk_size: usize) -> Result<(), io::Error> {
         if chunk_size != PAGE_SIZE {
-            eprintln!("set_chunk_size={} (rejected)", chunk_size);
+            eprintln!("set_chunk_size={chunk_size} (rejected)");
             Err(io::Error::new(
                 ErrorKind::Other,
                 "changing chunk size is not allowed",
             ))
         } else {
-            eprintln!("set_chunk_size={}", chunk_size);
+            eprintln!("set_chunk_size={chunk_size}");
             Ok(())
         }
     }
