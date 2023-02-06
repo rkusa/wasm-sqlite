@@ -1,5 +1,5 @@
-import * as Asyncify from "asyncify-wasm";
-import module from "./wasm_sqlite.wasm";
+import * as Asyncify from "https://unpkg.com/asyncify-wasm?module";
+import Context from "https://deno.land/std@0.176.0/wasi/snapshot_preview1.ts";
 
 export type Param = string | number | boolean | null;
 
@@ -10,6 +10,11 @@ export interface Vfs {
   delPage(ix: number): Promise<void>;
 }
 
+const context = new Context({
+  args: Deno.args,
+  env: Deno.env.toObject(),
+});
+
 export class Sqlite {
   private readonly exports: Exports;
 
@@ -19,147 +24,43 @@ export class Sqlite {
 
   public static async instantiate(vfs: Vfs): Promise<Sqlite> {
     let exports: Exports;
-    const stdout = new Log(false);
-    const stderr = new Log(true);
-    const instance = await Asyncify.instantiate(module, {
-      wasi_snapshot_preview1: {
-        // "wasi_snapshot_preview1"."random_get": [I32, I32] -> [I32]
-        random_get(offset: number, length: number) {
-          const buffer = new Uint8Array(exports.memory.buffer, offset, length);
-          crypto.getRandomValues(buffer);
 
-          return ERRNO_SUCCESS;
+    const instance = await Asyncify.instantiateStreaming(
+      fetch(new URL("../dist/wasm_sqlite.wasm", import.meta.url)),
+      {
+        wasi_snapshot_preview1: context.exports,
+
+        env: {
+          page_count(): number {
+            return vfs.pageCount();
+          },
+
+          async get_page(ix: number, ptr: number) {
+            const page = await vfs.getPage(ix);
+            // console.log("got page:", ix, page);
+            // console.log("write at", ptr, page.length);
+            const dst = new Uint8Array(exports.memory.buffer, ptr, 4096);
+            dst.set(page);
+          },
+
+          async put_page(ix: number, ptr: number) {
+            const page = new Uint8Array(exports.memory.buffer, ptr, 4096);
+            await vfs.putPage(ix, page);
+          },
+
+          async del_page(ix: number) {
+            await vfs.delPage(ix);
+          },
+
+          async conn_sleep(ms: number) {
+            // console.log("sleep", ms);
+            await new Promise<void>((resolve) => setTimeout(resolve, ms));
+          },
         },
-
-        // "wasi_snapshot_preview1"."clock_time_get": [I32, I64, I32] -> [I32]
-        clock_time_get(id: number, _precision: number, offset: number) {
-          const CLOCKID_REALTIME = 0;
-          const CLOCKID_MONOTONIC = 1;
-          const CLOCKID_PROCESS_CPUTIME_ID = 2;
-          const CLOCKID_THREAD_CPUTIME_ID = 3;
-
-          const memoryView = new DataView(exports.memory.buffer);
-
-          switch (id) {
-            case CLOCKID_REALTIME:
-
-            // performance.now() would be a better fit for the following, but is not available on
-            // Cloudflare Workers
-            case CLOCKID_MONOTONIC:
-            case CLOCKID_PROCESS_CPUTIME_ID:
-            case CLOCKID_THREAD_CPUTIME_ID: {
-              const time = BigInt(Date.now()) * BigInt(1e6);
-              memoryView.setBigUint64(offset, time, true);
-              break;
-            }
-
-            default:
-              return ERRNO_INVAL;
-          }
-
-          return ERRNO_SUCCESS;
-        },
-
-        // "wasi_snapshot_preview1"."fd_write": [I32, I32, I32, I32] -> [I32]
-        fd_write(
-          fd: number,
-          iovsOffset: number,
-          iovsLength: number,
-          nwrittenOffset: number
-        ) {
-          if (fd !== 1 && fd !== 2) {
-            return ERRNO_BADF;
-          }
-
-          const decoder = new TextDecoder();
-          const memoryView = new DataView(exports.memory.buffer);
-          let nwritten = 0;
-          for (let i = 0; i < iovsLength; i++) {
-            const dataOffset = memoryView.getUint32(iovsOffset, true);
-            iovsOffset += 4;
-
-            const dataLength = memoryView.getUint32(iovsOffset, true);
-            iovsOffset += 4;
-
-            const data = new Uint8Array(
-              exports.memory.buffer,
-              dataOffset,
-              dataLength
-            );
-            const s = decoder.decode(data);
-            nwritten += data.byteLength;
-            switch (fd) {
-              case 1: // stdout
-                stdout.write(s);
-                break;
-              case 2: // stderr
-                stderr.write(s);
-                break;
-              default:
-                return ERRNO_BADF;
-            }
-          }
-
-          memoryView.setUint32(nwrittenOffset, nwritten, true);
-
-          return ERRNO_SUCCESS;
-        },
-
-        // "wasi_snapshot_preview1"."poll_oneoff": [I32, I32, I32, I32] -> [I32]
-        poll_oneoff() {
-          return ERRNO_NOSYS;
-        },
-
-        // "wasi_snapshot_preview1"."environ_get": [I32, I32] -> [I32]
-        environ_get() {
-          throw new Error("environ_get not implemented");
-        },
-
-        // "wasi_snapshot_preview1"."environ_sizes_get": [I32, I32] -> [I32]
-        environ_sizes_get(
-          environcOffset: number,
-          _environBufferSizeOffset: number
-        ) {
-          const memoryView = new DataView(exports.memory.buffer);
-          memoryView.setUint32(environcOffset, 0, true);
-          return ERRNO_SUCCESS;
-        },
-
-        // "wasi_snapshot_preview1"."proc_exit": [I32] -> []
-        proc_exit(rval: number) {
-          throw new Error(`WASM program exited with code: ${rval}`);
-        },
-      },
-
-      env: {
-        page_count(): number {
-          return vfs.pageCount();
-        },
-
-        async get_page(ix: number, ptr: number) {
-          const page = await vfs.getPage(ix);
-          // console.log("got page:", ix, page);
-          // console.log("write at", ptr, page.length);
-          const dst = new Uint8Array(exports.memory.buffer, ptr, 4096);
-          dst.set(page);
-        },
-
-        async put_page(ix: number, ptr: number) {
-          const page = new Uint8Array(exports.memory.buffer, ptr, 4096);
-          await vfs.putPage(ix, page);
-        },
-
-        async del_page(ix: number) {
-          await vfs.delPage(ix);
-        },
-
-        async conn_sleep(ms: number) {
-          // console.log("sleep", ms);
-          await new Promise<void>((resolve) => setTimeout(resolve, ms));
-        },
-      },
-    });
-    exports = instance.exports as unknown as Exports;
+      }
+    );
+    context.initialize(instance.instance);
+    exports = instance.instance.exports as unknown as Exports;
 
     // increase asyncify stack size
     const STACK_SIZE = 4096;
@@ -279,11 +180,6 @@ class SqliteConnection implements Connection {
     await this.exports.conn_drop(this.ptr);
   }
 }
-
-const ERRNO_SUCCESS = 0;
-const ERRNO_BADF = 8;
-const ERRNO_INVAL = 28;
-const ERRNO_NOSYS = 52;
 
 interface Exports {
   readonly memory: WebAssembly.Memory;
