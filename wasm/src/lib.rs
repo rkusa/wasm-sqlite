@@ -148,6 +148,7 @@ extern "C" fn conn_execute(conn: *mut Connection, ptr: *const u8, len: usize) ->
     }
 }
 
+#[repr(C)]
 pub struct JsonString {
     ptr: NonNull<u8>,
     len: usize,
